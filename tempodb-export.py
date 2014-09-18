@@ -70,7 +70,7 @@ class Exporter:
         response = self.client.read_data(key=key.encode('utf-8'), start=START_DATE, end=END_DATE)
  
         with open(filename, 'w') as outfile:
-            for dp in response.data:
+            for dp in response:
                 line = dp.t.isoformat() + "," + str(dp.v) + "\n"
                 outfile.write(line)
  
