@@ -36,7 +36,7 @@ class Exporter:
         all_series = self.client.list_series()
  
         with open(self.series_filename, 'w') as outfile:
-            for series in all_series.data:
+            for series in all_series:
                 line = self.series_to_string(series) + "\n"
                 outfile.write(line.encode("utf-8"))
  
