@@ -53,11 +53,13 @@ class ThreadPool:
 
 class Migrator:
     def __init__(self, scheme, create_devices=True,
+                 write_data=True,
                  start_date="2000-01-01T00:00:00Z",
                  end_date="2014-12-31T00:00:00Z",
                  pool_size=3):
         self.scheme = scheme
         self.create_devices = create_devices
+        self.write_data = write_data
         self.start_date = start_date
         self.end_date = end_date
         self.tdb = TDBClient(scheme.db_key, scheme.db_key,
@@ -105,24 +107,45 @@ class Migrator:
 
     def migrate_series(self, series):
         print("  Beginning to migrate series: %s" % (series.key))
+        error = False
+        if self.create_devices:
+            error = self.create_device(series)
 
+        if self.write_data and not error:
+            error = self.write_data(series)
+
+        if not error:
+            print("COMPLETED migrating for series %s" % (series.key))
+
+    def create_device(self, series):
         (keys, tags, attrs) = self.scheme.series_to_filter(series)
         device_key = self.scheme.series_key_to_device_key(series.key)
 
-        if self.create_devices:
-            series_set = self.tdb.list_series(keys, tags, attrs)
-            dev_series = []
-            for series in series_set:
-                dev_series.append(series)
+        series_set = self.tdb.list_series(keys, tags, attrs)
+        dev_series = []
+        for series in series_set:
+            dev_series.append(series)
 
-            device = self.scheme.all_series_to_device(dev_series)
-            response = self.tiq.create_device(device)
-            if response.successful != tempoiq.response.SUCCESS:
+        if len(dev_series) == 0:
+            print("No series found for filter: " + series.key)
+            return True
+
+        device = self.scheme.all_series_to_device(dev_series)
+        response = self.tiq.create_device(device)
+        if response.successful != tempoiq.response.SUCCESS:
+            if "A device with that key already exists" in response.body:
+                print("Device already exists: %s" % (device.key))
+            else:
                 print("ERROR creating device: %s reason: (%d) %s"
                       % (device.key, response.status, response.reason))
                 print("   " + response.body)
                 print("   " + json.dumps(device, default=CreateEncoder().default))
-                return
+                return True
+        return False
+
+    def write_data(self, series):
+        (keys, tags, attrs) = self.scheme.series_to_filter(series)
+        device_key = self.scheme.series_key_to_device_key(series.key)
 
         db_data = self.tdb.read_multi(keys=keys, tags=tags, attrs=attrs,
                                       start=self.start_date, end=self.end_date)
@@ -144,7 +167,11 @@ class Migrator:
 
             count += 1
 
-        print("COMPLETED migrating device %s" % (device_key))
+        if count > 0:
+            write_request = {device_key: device_data}
+            self.write_with_retry(write_request, 3)
+
+        return False
 
     def write_with_retry(self, write_request, retries):
         res = self.tiq.write(write_request)
@@ -155,9 +182,11 @@ class Migrator:
 
             if retries > 0:
                 print("Retrying")
-                self.write_with_retry(write_request, retries - 1)
+                return self.write_with_retry(write_request, retries - 1)
             else:
                 print("No more retries! Lost data!")
+                return True
+        return False
 
 
 
