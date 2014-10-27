@@ -84,7 +84,6 @@ class Migrator:
 
         for series in series_set:
             if not found_first_series and series.key < start_key:
-                print("Skipping series %s" % (series.key))
                 continue
             else:
                 found_first_series = True
@@ -92,8 +91,10 @@ class Migrator:
             if limit and series_count >= limit:
                 print("Reached limit of %d devices, stopping." % (limit))
                 break
-            else:
-                # Queue each series to be processed by the threadpool
+
+            if self.scheme.identity_series_client_filter(series):
+                # If the series looks like an identity series,
+                # queue it to be processed by the threadpool
                 self.pool.add_task(self.migrate_series, series)
                 series_count += 1
 

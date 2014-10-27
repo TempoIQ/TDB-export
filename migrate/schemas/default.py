@@ -25,14 +25,25 @@ class MigrationScheme:
     def get_id_from_key(self, series_key):
         raise NotImplementedError("get_id_from_key not implemented")
 
+    def identity_series_client_filter(self, series):
+        """For cases when we can't get an identity series via server-side
+        filtering. Take a series object (presumably from listing all series
+        in a DB), and return True if we should make a Device from it."""
+        return True
+
     # Given a TempoDB series object, return a filter for all
     # series that should be included in the same device.
     def series_to_filter(self, series):
         raise NotImplementedError("series_to_filter not implemented")
 
-    def series_key_to_sensor_key(self, series_key):
-        raise NotImplementedError("series_key_to_sensor_key not implemented")
+    def split_series_key(self, key):
+        raise NotImplementedError("split_series_key not implemented")
 
-    def series_key_to_device_key(self, series):
-        raise NotImplementedError("series_key_to_device_key not implemented")
+    def series_key_to_sensor_key(self, series_key):
+        (dev, sensor) = self.split_series_key(series_key)
+        return sensor
+
+    def series_key_to_device_key(self, series_key):
+        (dev, sensor) = self.split_series_key(series_key)
+        return dev
 
