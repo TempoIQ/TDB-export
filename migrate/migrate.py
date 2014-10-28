@@ -8,12 +8,13 @@ import re
 import json
 import uuid
 import tempoiq.protocol
+import logging
 from tempodb.client import Client as TDBClient
 from tempoiq.client import Client as TIQClient
 from tempoiq.endpoint import HTTPEndpoint
 from tempoiq.protocol.encoder import WriteEncoder, CreateEncoder
 import tempoiq.response
-from threading import Thread
+from threading import Thread, Lock
 from Queue import Queue
 
 
@@ -59,7 +60,7 @@ class Migrator:
                  pool_size=3):
         self.scheme = scheme
         self.create_devices = create_devices
-        self.write_data = write_data
+        self.should_write_data = write_data
         self.start_date = start_date
         self.end_date = end_date
         self.tdb = TDBClient(scheme.db_key, scheme.db_key,
@@ -71,6 +72,9 @@ class Migrator:
                                    scheme.iq_secret)
         self.tiq = TIQClient(iq_endpoint)
         self.pool = ThreadPool(pool_size)
+        self.lock = Lock()
+        self.dp_count = 0
+        self.dp_reset = time.time()
 
     def migrate_all_series(self, start_key="", limit=None):
         start_time = time.time()
@@ -108,21 +112,24 @@ class Migrator:
     def migrate_series(self, series):
         print("  Beginning to migrate series: %s" % (series.key))
         error = False
-        if self.create_devices:
-            error = self.create_device(series)
+        try:
+            if self.create_devices:
+                error = self.create_device(series)
 
-        if self.write_data and not error:
-            error = self.write_data(series)
+            if self.should_write_data and not error:
+                error = self.write_data(series)
+        except Exception, e:
+            logging.exception(e)
 
         if not error:
             print("COMPLETED migrating for series %s" % (series.key))
 
     def create_device(self, series):
         (keys, tags, attrs) = self.scheme.series_to_filter(series)
-        device_key = self.scheme.series_key_to_device_key(series.key)
 
-        series_set = self.tdb.list_series(keys, tags, attrs)
         dev_series = []
+        device_key = self.scheme.series_key_to_device_key(series.key)
+        series_set = self.tdb.list_series(keys, tags, attrs)
         for series in series_set:
             dev_series.append(series)
 
@@ -159,9 +166,10 @@ class Migrator:
                 sensor_data = device_data.setdefault(sensor, [])
                 sensor_data.append({"t": point.t, "v": val})
 
-            if count > 50:
+            if count > 100:
                 write_request = {device_key: device_data}
                 self.write_with_retry(write_request, 3)
+                self.increment_counter(count)
                 count = 0
                 device_data = {}
 
@@ -170,8 +178,22 @@ class Migrator:
         if count > 0:
             write_request = {device_key: device_data}
             self.write_with_retry(write_request, 3)
+            self.increment_counter(count)
 
         return False
+
+    def increment_counter(self, count):
+        self.lock.acquire()
+        now = time.time()
+        self.dp_count += count
+
+        if (now - self.dp_reset > 60):
+            dpsec = self.dp_count / (now - self.dp_reset)
+            print("{0} Write throughput: {1} dp/s".format(datetime.datetime.now(), dpsec))
+            self.dp_reset = now
+            self.dp_count = 0
+
+        self.lock.release()
 
     def write_with_retry(self, write_request, retries):
         res = self.tiq.write(write_request)

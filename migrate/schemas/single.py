@@ -18,7 +18,7 @@ class SingleSensor(MigrationScheme):
     def identity_series_filter(self):
         """Filter that will return one TempoDB series for every device that
         should be created. Filter is a (keys, tags, attrs) tuple."""
-        return ([], [], {})
+        return (None, [], {})
 
     def identity_series_client_filter(self, series):
         """For cases when we can't get an identity series via server-side
@@ -29,7 +29,7 @@ class SingleSensor(MigrationScheme):
     def series_to_filter(self, series):
         """Given a TempoDB identity series object, return a filter for all
         series that should be included in the same device."""
-        return ([series.key], [], {})
+        return (series.key, None, None)
 
     def all_series_to_device(self, series_list):
         """Given a list of all TempoDB series belonging to the same device, return
@@ -44,7 +44,7 @@ class SingleSensor(MigrationScheme):
 
     def split_series_key(self, key):
         """Take a series key and return a tuple of (devicekey, sensorkey)"""
-        (key, self.sensor_name)
+        return (key, self.sensor_name)
 
     def series_key_to_sensor_key(self, series_key):
         (dev, sensor) = self.split_series_key(series_key)
