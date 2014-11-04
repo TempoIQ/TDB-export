@@ -14,42 +14,12 @@ from tempoiq.client import Client as TIQClient
 from tempoiq.endpoint import HTTPEndpoint
 from tempoiq.protocol.encoder import WriteEncoder, CreateEncoder
 import tempoiq.response
-from threading import Thread, Lock
-from Queue import Queue
+from threading import Lock
+import gevent
+from gevent.queue import JoinableQueue
+import gevent.monkey
 
-
-class Worker(Thread):
-    """Thread executing tasks from a given tasks queue"""
-    def __init__(self, tasks):
-        Thread.__init__(self)
-        self.tasks = tasks
-        self.daemon = True
-        self.start()
-
-    def run(self):
-        while True:
-            func, args, kargs = self.tasks.get()
-            try:
-                func(*args, **kargs)
-            except Exception, e:
-                print e
-            self.tasks.task_done()
-
-
-class ThreadPool:
-    """Pool of threads consuming tasks from a queue"""
-    def __init__(self, num_threads):
-        self.tasks = Queue(num_threads)
-        for _ in range(num_threads):
-            Worker(self.tasks)
-
-    def add_task(self, func, *args, **kargs):
-        """Add a task to the queue"""
-        self.tasks.put((func, args, kargs))
-
-    def wait_completion(self):
-        """Wait for completion of all the tasks in the queue"""
-        self.tasks.join()
+gevent.monkey.patch_all()
 
 
 class Migrator:
@@ -71,10 +41,20 @@ class Migrator:
                                    scheme.iq_key,
                                    scheme.iq_secret)
         self.tiq = TIQClient(iq_endpoint)
-        self.pool = ThreadPool(pool_size)
+        self.queue = JoinableQueue()
         self.lock = Lock()
         self.dp_count = 0
         self.dp_reset = time.time()
+        for i in range(pool_size):
+            gevent.spawn(self.worker)
+
+    def worker(self):
+        while True:
+            series = self.queue.get()
+            try:
+                self.migrate_series(series)
+            finally:
+                self.queue.task_done()
 
     def migrate_all_series(self, start_key="", limit=None):
         start_time = time.time()
@@ -101,10 +81,10 @@ class Migrator:
             if self.scheme.identity_series_client_filter(series):
                 # If the series looks like an identity series,
                 # queue it to be processed by the threadpool
-                self.pool.add_task(self.migrate_series, series)
+                self.queue.put(series)
                 series_count += 1
 
-        self.pool.wait_completion()
+        self.queue.join()
 
         end_time = time.time()
         print("Exporting {} devices took {} seconds".format(series_count, end_time - start_time))
@@ -120,9 +100,12 @@ class Migrator:
                 error = self.write_data(series)
         except Exception, e:
             logging.exception(e)
+            error = True
 
         if not error:
             print("COMPLETED migrating for series %s" % (series.key))
+        else:
+            print("ERROR migrating series %s" % (series.key))
 
     def create_device(self, series):
         (keys, tags, attrs) = self.scheme.series_to_filter(series)
@@ -165,6 +148,7 @@ class Migrator:
                 sensor = self.scheme.series_key_to_sensor_key(s_key)
                 sensor_data = device_data.setdefault(sensor, [])
                 sensor_data.append({"t": point.t, "v": val})
+                count += 1
 
             if count > 100:
                 write_request = {device_key: device_data}
@@ -172,8 +156,6 @@ class Migrator:
                 self.increment_counter(count)
                 count = 0
                 device_data = {}
-
-            count += 1
 
         if count > 0:
             write_request = {device_key: device_data}
@@ -187,7 +169,7 @@ class Migrator:
         now = time.time()
         self.dp_count += count
 
-        if (now - self.dp_reset > 60):
+        if (now - self.dp_reset > 10):
             dpsec = self.dp_count / (now - self.dp_reset)
             print("{0} Write throughput: {1} dp/s".format(datetime.datetime.now(), dpsec))
             self.dp_reset = now
