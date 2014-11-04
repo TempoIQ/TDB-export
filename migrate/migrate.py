@@ -44,6 +44,7 @@ class Migrator:
         self.queue = JoinableQueue()
         self.lock = Lock()
         self.dp_count = 0
+        self.req_count = 0
         self.dp_reset = time.time()
         for i in range(pool_size):
             gevent.spawn(self.worker)
@@ -167,13 +168,17 @@ class Migrator:
     def increment_counter(self, count):
         self.lock.acquire()
         now = time.time()
+        self.req_count += 1
         self.dp_count += count
 
         if (now - self.dp_reset > 10):
             dpsec = self.dp_count / (now - self.dp_reset)
-            print("{0} Write throughput: {1} dp/s".format(datetime.datetime.now(), dpsec))
+            reqsec = self.req_count / (now - self.dp_reset)
+            print("{0} Write throughput: {1:.2f} dp/s, {2:.2f} req/sec"
+                  .format(datetime.datetime.now(), dpsec, reqsec))
             self.dp_reset = now
             self.dp_count = 0
+            self.req_count = 0
 
         self.lock.release()
 
