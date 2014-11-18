@@ -40,17 +40,12 @@ class SingleSensor(MigrationScheme):
         for tag in series.tags:
             attributes[tag] = tag
 
-        return Device(series.key, attributes=attributes, sensors=sensors)
-
-    def split_series_key(self, key):
-        """Take a series key and return a tuple of (devicekey, sensorkey)"""
-        return (key, self.sensor_name)
+        key = self.series_to_device_key(series)
+        return Device(key, attributes=attributes, sensors=sensors)
 
     def series_key_to_sensor_key(self, series_key):
-        (dev, sensor) = self.split_series_key(series_key)
-        return sensor
+        return self.sensor_name
 
-    def series_key_to_device_key(self, series_key):
-        (dev, sensor) = self.split_series_key(series_key)
-        return dev
+    def series_to_device_key(self, series):
+        return series.key
 

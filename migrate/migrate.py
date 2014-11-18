@@ -112,10 +112,12 @@ class Migrator:
         (keys, tags, attrs) = self.scheme.series_to_filter(series)
 
         dev_series = []
-        device_key = self.scheme.series_key_to_device_key(series.key)
+        device_key = self.scheme.series_to_device_key(series)
+
         series_set = self.tdb.list_series(keys, tags, attrs)
-        for series in series_set:
-            dev_series.append(series)
+        for ser in series_set:
+            if self.scheme.series_client_filter(ser, series):
+                dev_series.append(ser)
 
         if len(dev_series) == 0:
             print("No series found for filter: " + series.key)
@@ -136,7 +138,7 @@ class Migrator:
 
     def write_data(self, series):
         (keys, tags, attrs) = self.scheme.series_to_filter(series)
-        device_key = self.scheme.series_key_to_device_key(series.key)
+        device_key = self.scheme.series_to_device_key(series)
 
         db_data = self.tdb.read_multi(keys=keys, tags=tags, attrs=attrs,
                                       start=self.start_date, end=self.end_date)
