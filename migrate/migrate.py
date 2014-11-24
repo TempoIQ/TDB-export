@@ -1,6 +1,11 @@
 # Script to export TempoDB data to TempoIQ
 # Relies on TempoDB python client v1.0: https://github.com/tempodb/tempodb-python/tree/v1.0
 
+import gevent
+from gevent.queue import JoinableQueue
+import gevent.monkey
+gevent.monkey.patch_all()  # Do this before other imports
+
 import time
 import datetime
 import os
@@ -15,11 +20,6 @@ from tempoiq.endpoint import HTTPEndpoint
 from tempoiq.protocol.encoder import WriteEncoder, CreateEncoder
 import tempoiq.response
 from threading import Lock
-import gevent
-from gevent.queue import JoinableQueue
-import gevent.monkey
-
-gevent.monkey.patch_all()
 
 
 class Migrator:
@@ -185,7 +185,13 @@ class Migrator:
         self.lock.release()
 
     def write_with_retry(self, write_request, retries):
-        res = self.tiq.write(write_request)
+        try:
+            res = self.tiq.write(write_request)
+        except Exception, e:
+            print("ERROR with request: --->")
+            print(json.dumps(write_request, default=WriteEncoder().default))
+            raise e
+
         if res.successful != tempoiq.response.SUCCESS:
             print("ERROR writing data! Reason: %s."
                   % (res.body))
